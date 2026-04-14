@@ -1,6 +1,6 @@
 # Kaikansen — skills.md
 > Phase-by-phase implementation guide.
-> **v7 — Next.js 16. Vercel. 5-part + Year Seed. Manual JWT. Voyage AI Vector Search. Quiz. Surprise Me. Friends System.**
+> **v8 — Next.js 16. Vercel. 5-part + Year Seed. Manual JWT. Voyage AI Vector Search. Vidstack Player. AI Search. Quiz. Surprise Me. Friends System.**
 > Each phase = one focused AI coding session. Follow phases in order.
 > Read rules.md and knowledge.md BEFORE starting any phase.
 
@@ -159,21 +159,9 @@ npx create-next-app@16 . \
 # React Compiler enabled via next.config.ts
 
 # Install all runtime dependencies:
-npm install \
-  jsonwebtoken \
-  bcryptjs \
-  next-themes \
-  @tanstack/react-query \
-  @tanstack/react-query-devtools \
-  mongoose \
-  plyr-react \
-  sonner \
-  lucide-react \
-  clsx \
-  tailwind-merge \
-  zod
+npm install \u0000jsonwebtoken \u0000bcryptjs \u0000next-themes \u0000@tanstack/react-query \u0000@tanstack/react-query-devtools \u0000mongoose \u0000@vidstack/player-react \u0000@vidstack/player \u0000sonner \u0000lucide-react \u0000clsx \u0000tailwind-merge \u0000zod
 
-# plyr-react ships its own TypeScript types — NO @types/plyr
+# Vidstack ships its own TypeScript types — modern player supporting HLS/DASH/webm
 
 # Install type definitions:
 npm install -D \
@@ -675,9 +663,8 @@ app/components/theme/VersionSwitcher.tsx ("use client"):
   Inactive: bg-bg-elevated border text-ktext-secondary
 
 VideoPlayer.tsx:
-  import Plyr from 'plyr-react'  — NO @types/plyr
-  import 'plyr-react/plyr.css'
-  If audioUrl is null and mode is 'listen': show disabled state
+  Use Vidstack player (@vidstack/player-react)
+  If audioUrl is null: play videoUrl in background (hidden video element)
   On first play: POST /api/history { themeSlug, atEntryId, mode }
   Error on history save: console.error only (don't toast — non-critical)
 ```
@@ -688,6 +675,24 @@ VideoPlayer.tsx:
 
 ## Step 6.1 — Search
 
+```
+app/search/page.tsx (Server Component shell)
+app/components/search/SearchClient.tsx ('use client'):
+  300ms debounce
+  AI Search Button in search bar (Sparkles icon)
+    - Toggles aiSearch mode
+    - When enabled: all queries go through vector search
+    - When disabled: standard text search with vector fallback
+  Three layer feedback in UI:
+    searchType='text'     → normal results
+    searchType='semantic' → 'No exact matches — showing related results' banner
+    searchType='mood'     → 'Showing themes matching the mood: [detected mood]' banner
+    searchType='ai'       → 'AI Search — Enhanced results' banner
+    searchType='none'     → 'No results found. Try different keywords.' + toast hint
+  Filter chips: All | OP | ED
+  Infinite scroll with useInfiniteQuery
+  Ranking: Exact match > Title match > Partial match > Related match
+  Error: toast.error('Search failed. Please try again.')
 ```
 app/search/page.tsx (Server Component shell)
 app/components/search/SearchClient.tsx ("use client"):
@@ -836,7 +841,7 @@ IDLE SCREEN:
   How it works: "Audio plays — no visuals. Pick the right answer."
 
 PLAYING SCREEN:
-  - Audio player (plyr-react in audio mode, NO video element)
+  - Audio player (Vidstack with hidden video element)
   - animeCoverImage blurred (filter: blur(20px)) as background
   - Timer bar animation (30 seconds countdown)
   - 4 option buttons (A/B/C/D)

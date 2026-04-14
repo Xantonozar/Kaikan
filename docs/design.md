@@ -641,55 +641,127 @@ Bottom nav items (5): Home (drop/wave icon) · Search · Quiz · Notifications (
 
 ---
 
-### 8.7 Video Player (plyr-react)
+### 8.7 Video Player (Vidstack)
+
+Vidstack is a modern, accessible media player that supports HLS, DASH, and webm.
+It handles both video playback and audio-only (background) playback gracefully.
 
 ```tsx
-// /app/components/theme/VideoPlayer.tsx ("use client")
-// plyr-react ships its own TypeScript types — no @types/plyr needed
-import Plyr from 'plyr-react'
-import 'plyr-react/plyr.css'
+// /app/components/theme/VideoPlayer.tsx
+'use client'
+import { useRef, useEffect } from 'react'
+import { Player, Media, Video } from '@vidstack/player-react'
+import '@vidstack/player-react/styles/default.css'
 
-// Custom CSS overrides in globals.css to match design system:
-// .plyr--full-ui .plyr__control { color: var(--accent-mint); }
-// .plyr--video .plyr__control.plyr__tab-focus,
-// .plyr--video .plyr__control:hover { background: var(--accent); }
-// .plyr__progress input[type=range]::-webkit-slider-thumb { background: var(--accent-mint); }
+interface VideoPlayerProps {
+  videoUrl: string | null
+  poster?: string | null
+  mode: 'watch' | 'listen'
+  onPlay?: () => void
+}
 
-<div className="relative w-full aspect-video rounded-[20px] overflow-hidden bg-bg-elevated">
-  {mode === 'watch' ? (
-    <Plyr
-      source={{
-        type: 'video',
-        sources: videoSources
-          .sort((a, b) => b.resolution - a.resolution)
-          .map(s => ({ src: s.url, type: 'video/webm', size: s.resolution })),
-        poster: animeCoverImage ?? undefined,
-      }}
-      options={{ playsInline: true }}
-    />
-  ) : (
-    /* Listen mode: render video hidden, show equalizer animation */
-    <>
-      <div className="hidden">
-        <Plyr
-          source={{
-            type: 'video',
-            sources: videoSources.map(s => ({ src: s.url, type: 'video/webm', size: s.resolution })),
-          }}
-          options={{ playsInline: true, muted: false }}
-        />
-      </div>
-      <div className="absolute inset-0 flex items-center justify-center bg-bg-surface">
-        <img src={animeCoverImage} className="absolute inset-0 w-full h-full object-cover opacity-20" />
-        <div className="flex items-end gap-1 h-12 relative z-10">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className={`w-1.5 bg-accent-mint rounded-full eq-bar-${i + 1}`} />
-          ))}
+export function VideoPlayer({ videoUrl, poster, mode, onPlay }: VideoPlayerProps) {
+  const playerRef = useRef<any>(null)
+  
+  useEffect(() => {
+    if (playerRef.current && onPlay) {
+      const handlePlay = () => onPlay()
+      const media = playerRef.current?.querySelector('media-player')
+      if (media) {
+        media.addEventListener('play', handlePlay)
+        return () => media.removeEventListener('play', handlePlay)
+      }
+    }
+  }, [onPlay])
+
+  if (!videoUrl) {
+    return (
+      <div className={`relative w-full aspect-video rounded-[20px] overflow-hidden bg-bg-elevated flex items-center justify-center`}>
+        <div className={`absolute inset-0 flex items-center justify-center bg-bg-surface`}>
+          <img src={poster ?? ''} className={`absolute inset-0 w-full h-full object-cover ${mode === 'listen' ? 'opacity-20' : ''}`} />
+          <div className={`flex items-end gap-1 h-12 relative z-10`}>
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className={`w-1.5 bg-accent-mint rounded-full eq-bar-${i + 1}`} />
+            ))}
+          </div>
         </div>
       </div>
-    </>
-  )}
-</div>
+    )
+  }
+
+  if (mode === 'listen') {
+    // Audio-only mode: hide video element, show equalizer animation
+    return (
+      <div className={`relative w-full aspect-video rounded-[20px] overflow-hidden bg-bg-elevated`}>
+        <div className={`absolute inset-0 flex items-center justify-center bg-bg-surface`}>
+          <img src={poster ?? ''} className={`absolute inset-0 w-full h-full object-cover opacity-20`} />
+          <div className={`flex items-end gap-1 h-12 relative z-10`}>
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className={`w-1.5 bg-accent-mint rounded-full eq-bar-${i + 1}`} />
+            ))}
+          </div>
+        </div>
+        {/* Hidden audio player for background playback */}
+        <div className={`hidden`}>
+          <Player
+            ref={playerRef}
+            src={videoUrl}
+            autoplay
+            muted={false}
+            playsInline
+          >
+            <Media>
+              <Video />
+            </Media>
+          </Player>
+        </div>
+      </div>
+    )
+  }
+
+  // Watch mode: show full video player
+  return (
+    <div className={`relative w-full aspect-video rounded-[20px] overflow-hidden bg-bg-elevated`}>
+      <Player
+        ref={playerRef}
+        src={videoUrl}
+        poster={poster ?? undefined}
+        autoplay
+        muted={false}
+        playsInline
+        controls
+      >
+        <Media>
+          <Video />
+        </Media>
+      </Player>
+    </div>
+  )
+}
+```
+
+#### Vidstack Installation
+```bash
+npm install @vidstack/player-react @vidstack/player
+```
+
+#### Custom CSS for Vidstack (globals.css)
+Vidstack uses CSS custom properties for theming. Add these to match the design system:
+```css
+/* Vidstack custom theme */
+media-player {
+  --media-control-background: rgba(10, 138, 150, 0.9);
+  --media-accent-color: var(--accent-mint);
+  --media-accent: var(--accent);
+  --media-text-color: var(--text-primary);
+  --media-range-bar-color: var(--accent-mint);
+  --media-range-track-background: var(--bg-overlay);
+  --media-range-thumb-background: var(--accent-mint);
+}
+
+media-player[data-theme='dark'] {
+  --media-control-background: rgba(78, 205, 196, 0.9);
+}
 ```
 
 ### Watch/Listen Toggle
@@ -1262,20 +1334,82 @@ Section dividers:
 ### 8.19 Search Page Layout
 
 ```tsx
-<div className="pt-4 space-y-4">
-  <div className="flex items-center gap-3 h-12 bg-bg-elevated rounded-full px-4
-                  border border-border-default focus-within:border-border-accent">
-    <Search className="w-4 h-4 text-ktext-tertiary flex-shrink-0" />
-    <input value={query} onChange={e => setQuery(e.target.value)}
-           placeholder="Search songs, artists, anime…"
-           className="flex-1 bg-transparent outline-none text-sm font-body text-ktext-primary" />
+<div className={`pt-4 space-y-4`}>
+  {/* Search Bar with AI Button */}
+  <div className={`flex items-center gap-2 h-12 bg-bg-elevated rounded-full px-4
+                  border border-border-default focus-within:border-border-accent`}>
+    <Search className={`w-4 h-4 text-ktext-tertiary flex-shrink-0`} />
+    <input 
+      value={query} 
+      onChange={e => setQuery(e.target.value)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' && !aiSearchEnabled) {
+          // Normal search on Enter
+        } else if (e.key === 'Enter' && aiSearchEnabled) {
+          // AI search trigger
+        }
+      }}
+      placeholder={`Search songs, artists, anime…`}
+      className={`flex-1 bg-transparent outline-none text-sm font-body text-ktext-primary`} 
+    />
+    {/* AI Search Toggle Button */}
+    <button 
+      onClick={() => setAiSearchEnabled(!aiSearchEnabled)}
+      className={`flex-shrink-0 p-2 rounded-full transition-all ${
+        aiSearchEnabled 
+          ? 'bg-accent text-white' 
+          : 'bg-bg-surface border border-border-default text-ktext-tertiary'
+      }`}
+      title={`AI Search ${aiSearchEnabled ? 'enabled' : 'disabled'}`}
+    >
+      <Sparkles className={`w-4 h-4`} />
+    </button>
     {query && (
-      <button onClick={clearQuery} className="interactive rounded-full p-1">
-        <X className="w-4 h-4 text-ktext-tertiary" />
+      <button onClick={clearQuery} className={`interactive rounded-full p-1`}>
+        <X className={`w-4 h-4 text-ktext-tertiary`} />
       </button>
     )}
   </div>
-  <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+  
+  {/* AI Search Active Indicator */}
+  {aiSearchEnabled && (
+    <div className={`flex items-center gap-2 px-3 py-2 bg-accent-container rounded-[12px]`}>
+      <Sparkles className={`w-4 h-4 text-accent flex-shrink-0`} />
+      <p className={`text-xs font-body text-accent`}>
+        AI Search — Enhanced results powered by semantic understanding
+      </p>
+    </div>
+  )}
+  
+  {/* Search Type Banner - Show when using semantic/mood search */}
+  {searchType === 'semantic' && (
+    <div className={`flex items-center gap-2 px-3 py-2 bg-accent-container rounded-[12px]`}>
+      <Sparkles className={`w-4 h-4 text-accent flex-shrink-0`} />
+      <p className={`text-xs font-body text-accent`}>
+        No exact matches — showing semantically related results
+      </p>
+    </div>
+  )}
+  
+  {searchType === 'mood' && (
+    <div className={`flex items-center gap-2 px-3 py-2 bg-accent-container rounded-[12px]`}>
+      <Music className={`w-4 h-4 text-accent flex-shrink-0`} />
+      <p className={`text-xs font-body text-accent`}>
+        Showing themes matching the mood: {moods?.join(', ')}
+      </p>
+    </div>
+  )}
+  
+  {searchType === 'none' && query.length >= 2 && (
+    <div className={`flex items-center gap-2 px-3 py-2 bg-semantic-warning/10 rounded-[12px]`}>
+      <AlertCircle className={`w-4 h-4 text-semantic-warning flex-shrink-0`} />
+      <p className={`text-xs font-body text-semantic-warning`}>
+        No results found. Try different keywords or disable AI search.
+      </p>
+    </div>
+  )}
+  
+  <div className={`flex gap-2 overflow-x-auto scrollbar-hide pb-1`}>
     {filters.map(filter => (
       <button key={filter.value} onClick={() => setFilter(filter.value)}
               className={`flex-shrink-0 h-9 px-4 rounded-full text-sm font-body font-medium interactive
@@ -1287,11 +1421,18 @@ Section dividers:
       </button>
     ))}
   </div>
-  <div className="space-y-2">
+  <div className={`space-y-2`}>
     {results.map(theme => <ThemeListRow key={theme.slug} {...theme} />)}
   </div>
 </div>
 ```
+
+#### AI Search Implementation Notes
+- AI button in search bar toggles semantic search mode
+- When enabled: all queries go through vector search + AI enhancement
+- When disabled: uses standard $text search with vector fallback
+- AI search uses Voyage AI for query embedding (cached in SearchCache)
+- Fallback for AI failures: automatically fall back to text search
 
 ---
 

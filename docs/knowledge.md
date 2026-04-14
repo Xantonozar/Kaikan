@@ -1,6 +1,6 @@
 # Kaikansen — knowledge.md
 > Everything an AI agent needs to know about internals.
-> **v7 — Pure Next.js 16. MongoDB Atlas (kaikansen DB). Seed Script (5-part + by-year). Manual JWT. AnimeThemes Primary. AniList + Kitsu Fallback. Voyage AI Vector Search.**
+> **v8 — Pure Next.js 16. MongoDB Atlas (kaikansen DB). Seed Script (5-part + by-year). Manual JWT. AnimeThemes Primary. AniList + Kitsu Fallback. Voyage AI Vector Search. Vidstack Player. Advanced Search with AI Integration.**
 > Read this ENTIRE file before writing any code. Do NOT skip sections.
 
 ---
@@ -10,19 +10,19 @@
 Kaikansen is about **OP/ED themes**, not anime.
 
 ```
-DATABASE: MongoDB Atlas → database name: "kaikansen"
+DATABASE: MongoDB Atlas → database name: kaikansen
 
 PRIMARY DATA SOURCE (seed time only — run ONCE before first deploy):
   AnimeThemes API → ALL themes + artists + images + seasons + ALL entries
 
 FALLBACK CHAIN (seed time only):
-  1. AnimeThemes   → slug, animethemesId, song, artists, entries, videos, images
+  1. AnimeThemes   → primary title (Romaji), animethemesId, song, artists, entries, videos, images (largest available)
   2. AniList       → anilistId (by malId first, title search if malId absent),
                      titleEnglish, titleNative, synonyms, season, year,
-                     genres, coverImage, bannerImage
-  3. Kitsu         → only if AniList ALSO fails → kitsuId, titleEnglish,
-                     titleJapanese, season (derived from startDate), posterImage
-  4. null/unknown  → any field still missing after all three sources
+                     genres, coverImage (large), bannerImage
+  3. Kitsu         → match by slug and title → kitsuId, titleEnglish,
+                     titleJapanese, season, posterImage (large), coverImage (large)
+  4. null/unknown  → any field still missing after three sources
 
 LIVE APP (deploy → forever):
   ALL queries → MongoDB Atlas only
@@ -32,16 +32,21 @@ LIVE APP (deploy → forever):
 ```
 
 ### What we store per theme (ONE doc per OP/ED theme):
+- Titles: Romaji (AT primary), Native (AniList), English (AniList → Kitsu), Alternative (union of all sources, deduplicated)
 - Song title + all artist names/slugs/roles
-- English title + all alternative names (union from AT + AniList + Kitsu, deduplicated)
+- Studio / Series data (AT primary, AniList fallback)
 - Season + year
 - ALL entries nested as `entries[]` — Standard, NC, BD, Piano variants etc
 - Each entry has all quality variants in `videoSources[]` (1080p/720p/480p)
 - Each entry has `audioUrl` = lowest resolution video URL (null if no videos)
 - Top-level `videoUrl`/`audioUrl` = convenience fields from best standard entry
-- Anime cover + grill images
-- Mood tags for semantic search (`["sad","emotional","epic","calm"]`)
+- Images: Small cover image (priority: AT Cover → AniList cover → Kitsu poster) and Banner image (priority: AT Grill → AniList banner → Kitsu cover)
+- Mood tags: `[]` (empty for now - keyword-based, weak semantic signal)
 - Vector embedding (1024-dim, populated by embed script after seed)
+- Full raw data from AnimeThemes API stored in entries for maximum flexibility
+
+### Search Ranking Logic
+- Exact match (title = query) > Title match (animeTitleEnglish contains query) > Partial match (contains query) > Related match (semantic search)
 
 ---
 

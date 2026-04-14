@@ -1,6 +1,6 @@
 # Kaikansen — rules.md
 > Hard rules for every AI agent, developer, or code generation session.
-> **v7 — Pure Next.js 16 App Router. Vercel hosting. MongoDB Atlas (kaikansen DB). Seed scripts (5-part + year). Manual JWT. Voyage AI Vector Search. No shadcn.**
+> **v8 — Pure Next.js 16 App Router. Vercel hosting. MongoDB Atlas (kaikansen DB). Seed scripts (5-part + year). Manual JWT. Voyage AI Vector Search. Vidstack Player. AI Search Integration. Advanced Search. No shadcn.**
 > Do NOT deviate from these unless explicitly told to in the session prompt.
 
 ---
@@ -56,7 +56,7 @@ Seed runs ONCE. MongoDB Atlas persists forever.
 | Database | MongoDB Atlas | Database name: **kaikansen** |
 | Auth | Manual JWT | Access token in memory, refresh in httpOnly cookie |
 | Dark mode | next-themes | `data-theme` attribute |
-| Video player | plyr-react | `"use client"` — ships own TS types, NO @types/plyr |
+| Video player | Vidstack | `"use client"` — modern, accessible, robust player |
 | Client state | TanStack Query v5 | Mutations + client queries |
 | Styling | Tailwind CSS + CSS vars | Light/dark via CSS custom properties |
 | UI components | Custom Tailwind | **No shadcn** — hand-built only |
@@ -71,6 +71,7 @@ Seed runs ONCE. MongoDB Atlas persists forever.
 | Node.js minimum | 20.9 | Required by Next.js 16 |
 | Vector search | MongoDB Atlas Vector Search + Voyage AI | Voyage AI via Atlas AI Models panel |
 | Embed model | voyage-4-large | 1024-dim, free 200M tokens |
+| AI Search | Voyager AI | Integrated into search bar with dedicated button |
 
 ---
 
@@ -264,11 +265,17 @@ Seed runs ONCE. MongoDB Atlas persists forever.
 - **`lib/db.ts` must NEVER trigger seeding** — seeding is strictly manual CLI
 - `animethemesId` is THE unique key for ThemeCache — not slug alone
 - Slug formula: `${anime.slug}-${type.toLowerCase()}${sequence}-${animethemesId}` — guaranteed unique
-- `audioUrl` may be **null** — always null-check before using. Never throw if null.
-- `animeTitleEnglish` may be null — always fallback to `animeTitle` for display
+- `audioUrl` may be **null** — if null, play audio using the video URL but keep the video hidden (background playback). Never disable playback because `audioUrl` is missing.
+- `animeTitleEnglish` may be null — always fallback to `animeTitle` (Romaji) for display.
 - `entries[]` — ALL versions nested in ThemeCache. Never separate docs per version.
 - `videoSources[]` inside each entry — ALL quality variants. Never discard lower resolutions.
-- `mood[]` — derived during seed from song/anime/genre keywords. Enhanced by embeddings.
+- `mood[]` — keep as an empty array `[]` for now.
+- Title normalization: Seed and normalize Romaji, Native, English, and Alternative titles.
+- Fallback priority: AnimeThemes (primary) → AniList → Kitsu.
+- Kitsu matching: Use both `slug` and `title` to choose the most accurate match dynamically.
+- Image seeding: Seed Small cover and Banner images. Priority: AnimeThemes (largest available) → AniList → Kitsu.
+- Studio/Series: Use data from AnimeThemes if available, fallback to AniList, then empty.
+- Full Data Seeding: Store ALL available data from AnimeThemes API without skipping important fields.
 - `embedding` field — NO regular Mongoose index. Use Atlas Vector Search index only.
 - `.lean()` for all read-only queries
 - Max 50/page default, 30 for popular/seasonal
@@ -371,8 +378,8 @@ export async function GET(
 - No `components/ui/` directory
 - All design tokens from `design.md` — colors via CSS vars
 - `FollowButton` accepts `label` prop (default `'Follow'`)
-- `audioUrl` null check: if null, disable listen mode button with `opacity-50 cursor-not-allowed` and tooltip "Audio not available"
-- **Never assume `audioUrl` is non-null** — always guard: `audioUrl ? <Player src={audioUrl} /> : <DisabledState />`
+- `audioUrl` handling: If `audioUrl` is null, play the video URL in the background (video element hidden). Never disable playback.
+- **Vidstack Player**: Used for both video and audio playback. Modern, robust, and accessible.
 - All user-facing errors shown via `sonner` toast — `toast.error(message)`
 - All user-facing successes shown via `toast.success(message)`
 - Loading states: use `toast.loading()` for async actions
@@ -450,6 +457,12 @@ export default [
 - Voyage AI endpoint: `https://api.voyageai.com/v1/embeddings` (direct) OR `https://ai.mongodb.com/v1/embeddings` (Atlas proxy)
 - Use Atlas proxy as primary (key from Atlas AI Models panel)
 - `VOYAGE_API_KEY` in env — never hardcode
+- Search ranking logic: **Exact match > Title match > Partial match > Related match**.
+- Search implements intelligent partial-match search:
+  - Loose match (broad search): Query 'nar' finds 'Naruto', 'Naruto Shippuden', 'Boruto: Naruto Next Generations'
+  - Exact refinement: Query 'naruto shippuden' returns only 'Naruto Shippuden'
+  - Extended query support: Query 'naruto op 9' finds 'Naruto OP 9', 'Naruto Shippuden OP 9', 'Boruto Naruto OP 9'
+- AI Search: Add an AI button in the search bar to trigger Voyage AI for semantic/enhanced query handling.
 - Search fallback order: `$text` first → zero results → vector search
 - Mood queries (sad, epic, etc.) → skip `$text`, go direct to vector + mood filter
 - SearchCache: 30-day TTL, cache all query embeddings to minimize API calls
@@ -512,8 +525,8 @@ QUIZ:
 2. **Never auto-seed from `lib/db.ts`** — seeding is manual CLI only
 3. **Always `await params`** in Next.js 16 route handlers and pages
 4. **`tsconfig.json` must have `baseUrl: "."`** — required for `@/` alias in root-level `proxy.ts`
-5. **`audioUrl` may be null** — always null-check, never assume it exists
-6. **Never add `@types/plyr`** — plyr-react ships its own TypeScript types
+5. **`audioUrl` may be null** — if null, play audio using video URL in background; never disable playback.
+6. **Use Vidstack Player** — robust and accessible player for video/audio.
 7. **Never use `findOneAndUpdate` with upsert for Rating saves** — use `findOne` + `.save()` to trigger hooks
 8. **`animethemesId` is the unique ThemeCache key** — slug alone is not unique enough
 9. **Never call AniList/AnimeThemes/Kitsu from live app routes** — seed only
@@ -594,11 +607,16 @@ QUIZ:
 - Manual JWT (access token in memory, refresh in httpOnly cookie)
 - Voyage AI vector search via MongoDB Atlas AI Models panel
 - Tailwind CSS + CSS vars (no shadcn — all components hand-built)
-- TanStack Query v5, sonner toasts, lucide-react icons, plyr-react video
+- TanStack Query v5, sonner toasts, lucide-react icons, Vidstack player
 
 ## Seed flow (run ONCE before first deploy):
   npm run seed:all   → scripts/seed-all/ (A-E, F-J, K-O, P-T, U-Z)
   npm run embed      → scripts/embed.ts (Voyage AI embeddings)
+
+## Key Rules:
+1. audioUrl may be null — play video URL in background; never disable playback.
+2. Search ranking: Exact > Title > Partial > Related.
+3. Seeding fallback: AnimeThemes > AniList > Kitsu.
 
 ## Auth pattern:
   proxy.ts at root — custom auth helper, NOT Next.js auto-middleware

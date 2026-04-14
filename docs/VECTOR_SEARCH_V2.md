@@ -431,10 +431,10 @@ main().catch(err => {
 
 ---
 
-## 4. SEARCH — THREE LAYER IMPLEMENTATION
+## 4. SEARCH — ADVANCED IMPLEMENTATION WITH AI INTEGRATION
 
 ```typescript
-// app/api/search/route.ts — complete implementation
+// app/api/search/route.ts — complete implementation with AI search support
 
 import { NextRequest, NextResponse } from 'next/server'
 import { connectDB } from '@/lib/db'
@@ -452,9 +452,10 @@ export async function GET(req: NextRequest) {
     await connectDB()
 
     const { searchParams } = new URL(req.url)
-    const q    = (searchParams.get('q') ?? '').trim()
-    const type = searchParams.get('type')
-    const page = parseInt(searchParams.get('page') ?? '1')
+    const q        = (searchParams.get('q') ?? '').trim()
+    const type     = searchParams.get('type')
+    const page     = parseInt(searchParams.get('page') ?? '1')
+    const aiSearch = searchParams.get('ai') === 'true'  // AI search toggle
 
     if (q.length < 2) {
       return NextResponse.json(
@@ -469,9 +470,55 @@ export async function GET(req: NextRequest) {
 
     // Detect mood words in query
     const detectedMoods = MOOD_WORDS.filter(w => qLower.includes(w))
-    const isMoodQuery   = detectedMoods.length > 0
+    const isMoodQuery    = detectedMoods.length > 0
 
-    // ── LAYER 1: $text search (exact, fast, free) ──────────────────────────
+    // ── AI SEARCH MODE: Skip text search, go directly to vector ───────────────
+    if (aiSearch) {
+      const embedding = await getQueryEmbedding(q)
+      if (!embedding) {
+        return NextResponse.json({
+          success: true,
+          data:    [],
+          meta:   { page: 1, total: 0, hasMore: false, searchType: 'ai-failed' },
+        })
+      }
+
+      const vectorFilter: any = {}
+      if (type) vectorFilter.type = { $eq: type }
+      if (detectedMoods.length > 0) vectorFilter.mood = { $in: detectedMoods }
+
+      const aiResults = await ThemeCache.aggregate([
+        {
+          $vectorSearch: {
+            index:         'vector_index',
+            path:          'embedding',
+            queryVector:   embedding,
+            numCandidates: 200,
+            limit:         limit,
+            ...(Object.keys(vectorFilter).length > 0 ? { filter: vectorFilter } : {}),
+          },
+        },
+        {
+          $addFields: { vectorScore: { $meta: 'vectorSearchScore' } },
+        },
+      ])
+
+      return NextResponse.json({
+        success: true,
+        data:    aiResults,
+        meta:   {
+          page:       1,
+          total:      aiResults.length,
+          hasMore:    false,
+          searchType: isMoodQuery ? 'ai-mood' : 'ai',
+          moods:      detectedMoods,
+        },
+      })
+    }
+
+    // ── STANDARD MODE: Three-layer search ─────────────────────────────────────
+    
+    // LAYER 1: $text search (exact, fast, free)
     if (!isMoodQuery) {
       const textFilter: any = { $text: { $search: q } }
       if (type) textFilter.type = type
@@ -485,17 +532,129 @@ export async function GET(req: NextRequest) {
         ThemeCache.countDocuments(textFilter),
       ])
 
-      if (textResults.length > 0) {
+      // Apply ranking: Exact match > Title match > Partial match > Related
+      const rankedResults = rankSearchResults(textResults, q)
+      
+      if (rankedResults.length > 0) {
         return NextResponse.json({
           success: true,
-          data:    textResults,
+          data:    rankedResults,
           meta: {
             page,
             total:   textTotal,
-            hasMore: skip + textResults.length < textTotal,
+            hasMore: skip + rankedResults.length < textTotal,
             searchType: 'text',
           },
         })
+      }
+    }
+
+    // LAYER 2 / 3: Vector search (semantic or mood)
+    const embedding = await getQueryEmbedding(q)
+
+    if (!embedding) {
+      // Voyage API unavailable — return empty gracefully
+      return NextResponse.json({
+        success: true,
+        data:    [],
+        meta:   { page: 1, total: 0, hasMore: false, searchType: 'none' },
+      })
+    }
+
+    // Build vector pre-filters
+    const vectorFilter: any = {}
+    if (type)                    vectorFilter.type = { $eq: type }
+    if (detectedMoods.length > 0) vectorFilter.mood = { $in: detectedMoods }
+
+    // numCandidates must be >> limit to compensate for any post-filtering
+    const semanticResults = await ThemeCache.aggregate([
+      {
+        $vectorSearch: {
+          index:         'vector_index',
+          path:          'embedding',
+          queryVector:   embedding,
+          numCandidates: 200,
+          limit:         limit,
+          ...(Object.keys(vectorFilter).length > 0 ? { filter: vectorFilter } : {}),
+        },
+      },
+      {
+        $addFields: { vectorScore: { $meta: 'vectorSearchScore' } },
+      },
+    ])
+
+    return NextResponse.json({
+      success: true,
+      data:    semanticResults,
+      meta:   {
+        page:       1,
+        total:      semanticResults.length,
+        hasMore:    false,
+        searchType: isMoodQuery ? 'mood' : 'semantic',
+        moods:      detectedMoods,
+      },
+    })
+
+  } catch (err) {
+    console.error('[API] GET /api/search:', err)
+    return NextResponse.json(
+      { success: false, error: 'Search failed. Please try again.', code: 500 },
+      { status: 500 }
+    )
+  }
+}
+
+// ── RANKING LOGIC ─────────────────────────────────────────────────────────────
+// Exact match > Title match > Partial match > Related match
+
+function rankSearchResults(results: any[], query: string): any[] {
+  const qLower = query.toLowerCase().trim()
+  
+  return results
+    .map(theme => {
+      let rankScore = 0
+      
+      // Exact match (song title = query or anime title = query)
+      if (theme.songTitle?.toLowerCase() === qLower || 
+          theme.animeTitle?.toLowerCase() === qLower ||
+          theme.animeTitleEnglish?.toLowerCase() === qLower) {
+        rankScore = 1000
+      }
+      // Title match (query is contained in title)
+      else if (theme.songTitle?.toLowerCase().includes(qLower) ||
+               theme.animeTitle?.toLowerCase().includes(qLower) ||
+               theme.animeTitleEnglish?.toLowerCase().includes(qLower)) {
+        rankScore = 500
+      }
+      // Partial match (title contains any word from query)
+      else {
+        const queryWords = qLower.split(' ')
+        const hasPartialMatch = queryWords.some(word => 
+          word.length >= 2 && (
+            theme.songTitle?.toLowerCase().includes(word) ||
+            theme.animeTitle?.toLowerCase().includes(word) ||
+            theme.animeTitleEnglish?.toLowerCase().includes(word) ||
+            theme.allArtists?.some((a: string) => a.toLowerCase().includes(word))
+          )
+        )
+        rankScore = hasPartialMatch ? 200 : 50
+      }
+      
+      // Bonus for exact match on artist
+      if (theme.artistName?.toLowerCase() === qLower) {
+        rankScore += 100
+      }
+      
+      // Include original text score for final sort
+      return { ...theme, rankScore }
+    })
+    .sort((a, b) => {
+      // Primary: rankScore descending
+      if (b.rankScore !== a.rankScore) return b.rankScore - a.rankScore
+      // Secondary: textScore descending (from MongoDB $text)
+      return (b.score?.$meta?.textScore ?? 0) - (a.score?.$meta?.textScore ?? 0)
+    })
+}
       }
     }
 
